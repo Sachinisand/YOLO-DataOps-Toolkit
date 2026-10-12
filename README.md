@@ -1,166 +1,111 @@
-# YOLO DataOps Professional Annotation Toolkit
+# YOLO Annotation Toolkit
 
-A professional-grade annotation tool for creating YOLO-format datasets with advanced features for computer vision applications.
+A small OpenCV tool to draw, review, visualise and **quality-check** bounding-box labels in YOLO format, the input format for training object-detection models.
 
-## Features
+[![tests](https://github.com/Sachinisand/YOLO-DataOps-Toolkit/actions/workflows/tests.yml/badge.svg)](https://github.com/Sachinisand/YOLO-DataOps-Toolkit/actions/workflows/tests.yml)
 
-### 🎯 Annotation Mode
-- **Intuitive Drawing**: Click and drag to create bounding boxes
-- **Multi-class Support**: Assign class IDs (0-9) to each box
-- **Smart Zoom**: Zoom in/out centered on cursor position for precise annotations
-- **Brightness & Contrast**: Real-time image enhancement with sliders
-- **Pan Control**: Arrow keys for image navigation
-- **Undo/Redo**: Full history support (U/Y keys)
-- **Batch Processing**: Annotate multiple images in one session
-- **Visual Feedback**: Real-time crosshair cursor and box information
+![Sample images with their labels](data/preview.jpg)
 
-### 📋 Review Mode
-- Review existing YOLO format annotations
-- Modify class IDs for existing boxes
-- Delete incorrect annotations
-- Save updated labels
+## What it does
 
-### 🎨 Visualization Mode
-- Generate annotated images with boxes drawn
-- Quick verification of annotation quality
-- Export for documentation and review
+| Command | Purpose |
+|---|---|
+| `annotate` | Draw boxes in an OpenCV window. Existing labels are loaded, so you can resume or correct earlier work. |
+| `review` | Same window, but reads labels from one folder and saves to another (keeps the original labels). |
+| `visualize` | Writes copies of the images with the boxes drawn, for a quick visual check. |
+| `check` | Data-quality report: boxes per class, images without labels, labels without images, unreadable lines, zero-size boxes, boxes outside the image, unknown class ids. Exit code 1 if anything is wrong, so it can run in a pipeline. |
 
-## Installation
+## Quick start
 
-### Requirements
-- Python 3.9+
-- OpenCV (cv2)
-- NumPy
-- Matplotlib
-
-### Setup
 ```bash
-pip install numpy opencv-python matplotlib
+pip install -r requirements.txt
+
+python src/yolo_manager.py check     --img_dir data/images --lbl_dir data/annotated_labels
+python src/yolo_manager.py visualize --img_dir data/images --lbl_dir data/annotated_labels --save_dir data/visualizations
+python src/yolo_manager.py annotate  --img_dir data/images --lbl_dir data/annotated_labels
 ```
 
-## Usage
+`check` on the sample data finds one real problem:
 
-### Annotate New Images
-```bash
-python src/yolo_manager.py annotate --img_dir data/images --save_dir data/annotated_labels
+```
+images: 5 | with labels: 5 | boxes: 8
+boxes per class: 0: 3, 2: 1, 3: 1, 4: 1, 5: 2
+  zero-size box   4.txt box 1
+1 problem(s) found
 ```
 
-### Review Existing Annotations
-```bash
-python src/yolo_manager.py review --img_dir data/images --lbl_dir data/labels --save_dir data/updated_labels
-```
+That box (width and height 0) came from a click without a drag in the first version of the tool. A model training pipeline would accept it silently. The current version ignores clicks shorter than 3 pixels, and `check` catches any that already exist. Add `--report issues.csv` to save the list, or `--classes 6` to flag class ids outside 0–5.
 
-### Visualize Annotations
-```bash
-python src/yolo_manager.py visualize --img_dir data/images --lbl_dir data/labels --save_dir data/visualizations
-```
+## Annotation window
 
-## Keyboard Controls
+| Key / mouse | Action |
+|---|---|
+| left drag | draw a box (any direction) |
+| right click | select the box under the cursor (the smallest one, if boxes overlap) |
+| `0`–`9` | class for new boxes; also changes the selected box |
+| `x` / `c` | delete selected box / clear all |
+| `u` / `y` | undo / redo |
+| `+` / `-` | zoom in / out at the cursor |
+| arrow keys | pan |
+| `r` | reset zoom, pan, brightness and contrast |
+| `q` / `s` / `Esc` | save and next / skip without saving / save and stop |
+| `h` | hide or show the help text |
 
-### Drawing & Selection
-| Key | Action |
-|-----|--------|
-| **Click & Drag** | Draw bounding box |
-| **Right Click** | Select/deselect box |
-| **0-9** | Set class ID |
+Brightness and contrast sliders only change the display, not the image.
 
-### Editing
-| Key | Action |
-|-----|--------|
-| **X** | Delete selected box |
-| **C** | Clear all boxes |
-| **U** | Undo last action |
-| **Y** | Redo last action |
+## Label format
 
-### Zoom & Pan
-| Key | Action |
-|-----|--------|
-| **+/-** | Zoom in/out (centered on cursor) |
-| **Arrow Keys** | Pan image |
-| **Shift + Arrow** | Move selected box |
-| **R** | Reset zoom/pan/brightness |
+One `.txt` per image with the same name. One line per box, all values relative to the image size (0–1):
 
-### Image Adjustments
-| Control | Action |
-|---------|--------|
-| **Brightness Slider** | Adjust brightness (-50 to +50) |
-| **Contrast Slider** | Adjust contrast (0.1x to 3.0x) |
-
-### Navigation
-| Key | Action |
-|-----|--------|
-| **Q** | Save and move to next image |
-
-## Output Format
-
-Annotations are saved in YOLO format (one file per image):
 ```
 <class_id> <x_center> <y_center> <width> <height>
+0 0.376904 0.472381 0.324873 0.350476
 ```
 
-Where coordinates are normalized to 0-1 range.
+An empty file means "this image has no objects", which is valid YOLO.
 
-Example:
-```
-0 0.5234 0.3456 0.2341 0.4567
-1 0.7234 0.6543 0.1567 0.2341
+## Bugs found and fixed in version 2
+
+Version 2 is a rewrite that fixes these problems in version 1. Each fix has a test in `tests/test_core.py`:
+
+| Problem in version 1 | Effect | Fix |
+|---|---|---|
+| Boxes drawn while zoomed in were stored in screen coordinates | Labels shifted to the wrong place | Boxes are always kept in image pixels; a `View` converts screen ↔ image |
+| Drawing from bottom-right to top-left | Negative width/height in the label file | Corners are sorted and clipped to the image |
+| One undo removed two actions | Lost work | Undo stores a snapshot before each change |
+| A click without a drag | Zero-size box (still in the sample data, see above) | Minimum box size, plus the `check` command |
+| Default image format `png`, sample images are `.jpeg` | README commands found 0 images | All common image types are found |
+| Review mode used different keys and could not add boxes | Two inconsistent tools | Review uses the same window as annotate |
+| Arrow-key codes only worked on Linux | No panning on Windows | Key codes for Linux, Windows and macOS |
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
 ```
 
-## Project Structure
+13 tests cover the coordinate conversion, zoom and pan, undo/redo, selection and the dataset check. They need no window. GitHub Actions runs them, and the `check` command on the sample data, on every push.
+
+## Project structure
 
 ```
-YOLO-DataOps-Toolkit/
 ├── src/
-│   └── yolo_manager.py          # Main annotation tool
+│   ├── yolo_core.py       ← box maths, zoom/pan, undo, dataset check (no GUI, tested)
+│   └── yolo_manager.py    ← OpenCV window and command line
+├── tests/test_core.py
 ├── data/
-│   ├── images/                  # Input images
-│   ├── annotated_labels/        # Generated labels
-│   ├── visualizations/          # Generated visualizations
-│   └── updated_labels/          # Updated labels from review mode
-├── README.md                    # This file
-└── requirements.txt             # Python dependencies
+│   ├── images/            ← 5 sample photos
+│   ├── annotated_labels/  ← their YOLO labels
+│   └── preview.jpg        ← output of the visualize command (used above)
 ```
 
-## Tips for Best Results
+## Limitations
 
-1. **Use Zoom**: Zoom in (+) for precise annotation of small objects
-2. **Use Brightness/Contrast**: Adjust lighting for better visibility
-3. **Review Often**: Use visualization mode to verify quality
-4. **Batch Processing**: Process multiple images efficiently
-5. **Undo/Redo**: Don't fear mistakes - use U/Y keys
-
-## Supported Formats
-
-- PNG (default)
-- JPG
-- Other OpenCV-supported formats (use --format flag)
-
-## Performance
-
-- Handles high-resolution images efficiently
-- Real-time zoom and pan operations
-- Smooth annotation workflow
-
-## Professional Features
-
-✅ State management with undo/redo
-✅ Batch processing
-✅ Quality visualization
-✅ Professional UI with keyboard shortcuts
-✅ Cursor-based zoom
-✅ Image enhancement
-✅ Multi-class support
-✅ YOLO format compliance
-
-## License
-
-MIT License - Feel free to use and modify for your projects
-
-## Support
-
-For issues or feature requests, please create an issue in the repository.
+- Class ids are numbers 0–9; there is no class-name file yet.
+- One image at a time, no keyboard shortcut to go back to the previous image (run `annotate` again: saved labels are loaded).
+- The sample set is 5 photos, only to demonstrate the tool, not a training dataset.
 
 ---
 
-**Version**: 1.0 Professional Edition
-**Last Updated**: January 2026
+**Author:** Sachini Hewahattage · [LinkedIn](https://www.linkedin.com/in/sachini-hewahattage) · [GitHub](https://github.com/Sachinisand)
